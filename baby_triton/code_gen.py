@@ -1,4 +1,6 @@
 import ast
+import astunparse
+from typing import Dict, Any
 import tvm
 from typing import Dict, Any
 from tvm import relax as rx
@@ -9,9 +11,10 @@ from tvm.script.ir_builder import IRBuilder
 
 
 class CodeGenerator(ast.NodeVisitor):
-    def __init__(self, fn_ast, target):
+    def __init__(self, fn_ast, ctx, target):
         self.fn_ast = fn_ast
         self.target = target
+        self.ctx = ctx
         self.ib = IRBuilder()
         self.ir_module = None
         self.entry = None
@@ -26,7 +29,18 @@ class CodeGenerator(ast.NodeVisitor):
             self.visit(self.fn_ast)
         # get IRModule by building
         module = self.ib.get()
-        print(f"module: {module}")
+        print(f"module:\n{module}")
+
+        # apply transform pass on module
+        with tvm.transform.PassContext(opt_level=3):
+            # apply opt pass
+            seq = tvm.transform.Sequential(
+                [rx.transform.LegalizeOps(),]
+            )
+            module = seq(module)
+        print("After applied pass...")
+        print(f"module:\n{module}")
+
         # use Relax Virtual Machine to general compiled
         # kernel code on target device
         mapped_target = {'cpu': 'llvm', 'gpu': 'cuda'}
@@ -56,6 +70,7 @@ class CodeGenerator(ast.NodeVisitor):
         with fn:
             # ctor Relax FunctionFrame
             relax.func_name(node.name)
+            self.visit(node=node.args)
             self._visit_compound_stmt(node.body)
 
             if self.ret is None:
@@ -63,11 +78,29 @@ class CodeGenerator(ast.NodeVisitor):
             else:
                 relax.func_ret_value(self.ret)
 
+    """
+    deal with arguments of Tensor, which is essential to
+    translate the shape and dtype
+    """
+    def visit_arguments(self, node: ast.arguments):
+        for arg in node.args:
+            if arg.annotation is None:
+                raise ValueError(arg,
+                                 "Type annotation is required "
+                                 "for function parameters.")
+            arg_name = arg.arg
+            # why use eval and astunparse?
+            # if dynamic, relax can use DynTensorType to support
+            anno = eval(astunparse.unparse(arg.annotation), self.ctx)
+            param = relax.arg(arg_name, relax.Tensor(shape=anno.shape,
+                                                     dtype=anno.dtype))
+            self.local_var_table[arg_name] = param
+
     def visit_Pass(self, node: ast.Pass):
         pass
 
     """
-    translating into Relax Var, and mapping with the visit value 
+    translating into Relax Var, and mapping with the visit value
     """
     def visit_Assign(self, node: ast.Assign):
         if len(node.targets) != 1:

@@ -20,6 +20,10 @@ class JIT():
         fn_src = inspect.getsource(self.fn)
         fn_ast = ast.parse(fn_src)
         print(f"ast: {ast.dump(fn_ast)}")
-        code_generator = CodeGenerator(fn_ast, self.target)
+        ctx = self.fn.__globals__.copy()
+        code_generator = CodeGenerator(fn_ast, ctx=ctx, target=self.target)
         compiled_kernel = code_generator.code_gen()
-        return compiled_kernel()
+        input_args = []
+        for arg in args:
+            input_args.append(arg.data)
+        return compiled_kernel(*input_args)

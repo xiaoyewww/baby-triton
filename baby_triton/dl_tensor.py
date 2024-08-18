@@ -1,3 +1,6 @@
+import torch
+
+
 class Tensor:
     def __init__(self, shape, dtype):
         self.shape = shape
@@ -28,9 +31,11 @@ class Tensor:
             )
         data = _from_dlpack(data)
         if data.shape != tuple(self.shape):
-            raise ValueError(f"Shape mismatch: expected {tuple(self.shape)}, got {data.shape}")
+            raise ValueError(f"Shape mismatch: expected {tuple(self.shape)},"
+                             " got {data.shape}")
         if data.dtype != self.dtype:
-            raise ValueError(f"Dtype mismatch: expected {self.dtype}, got {data.dtype}")
+            raise ValueError(f"Dtype mismatch: expected {self.dtype},"
+                             " got {data.dtype}")
         self._data = data
 
     def __str__(self):

@@ -4,6 +4,7 @@ from typing import Dict, Any
 import tvm
 from typing import Dict, Any
 from tvm import relax as rx
+from tvm import dlight as dl
 from tvm.script import relax
 from tvm.script.ir_builder import relax as relax_builder
 from tvm.script.ir_builder import ir
@@ -35,7 +36,15 @@ class CodeGenerator(ast.NodeVisitor):
         with tvm.transform.PassContext(opt_level=3):
             # apply opt pass
             seq = tvm.transform.Sequential(
-                [rx.transform.LegalizeOps(),]
+                [
+                    # support to fuse ops
+                    # NOTO: ConvertToDataflow
+                    rx.transform.ConvertToDataflow(),
+                    rx.transform.LegalizeOps(),
+                    rx.transform.AnnotateTIROpPattern(),
+                    rx.transform.FuseOps(),
+                    rx.transform.FuseTIR(),
+                ]
             )
             module = seq(module)
         print("After applied pass...")
@@ -45,8 +54,21 @@ class CodeGenerator(ast.NodeVisitor):
         # kernel code on target device
         mapped_target = {'cpu': 'llvm', 'gpu': 'cuda'}
         target = tvm.target.Target(mapped_target[self.target])
+
+        # auto schedule the kernel with blocks and threads
+        if "cuda" in target.keys:
+            with target:
+                module = dl.ApplyDefaultSchedule(dl.gpu.Fallback(),)(module)
+            print("After applied dlight...")
+            print(f"module:\n{module}")
+
         with tvm.transform.PassContext(opt_level=3):
             ex = rx.build(module, target)
+
+        if "cuda" in target.keys:
+            print("cuda kenrel code: ")
+            print(ex.mod.imported_modules[0].imported_modules[0].get_source())
+            print("\n")
         device = tvm.cuda() if "cuda" in target.keys else tvm.cpu()
         vm = rx.VirtualMachine(ex, device)
         return vm[self.entry]
@@ -90,8 +112,9 @@ class CodeGenerator(ast.NodeVisitor):
                                  "for function parameters.")
             arg_name = arg.arg
             # why use eval and astunparse?
-            # if dynamic, relax can use DynTensorType to support
+            # [TODO] if dynamic, relax can use DynTensorType to support
             anno = eval(astunparse.unparse(arg.annotation), self.ctx)
+            # print(f"anno: {anno}")
             param = relax.arg(arg_name, relax.Tensor(shape=anno.shape,
                                                      dtype=anno.dtype))
             self.local_var_table[arg_name] = param

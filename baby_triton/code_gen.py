@@ -178,8 +178,11 @@ class CodeGenerator(ast.NodeVisitor):
     translate op to Relax op
     """
     def _binOp_maker(self, node: ast.operator):
+        # print(f"relax:\n{dir(relax)}")
         if isinstance(node, ast.Add):
             return relax.add
+        elif isinstance(node, ast.Mult):
+            return relax.multiply
         else:
             raise NotImplementedError("Unsupported AST node type: {}".
                                       format(type(node).__name__))

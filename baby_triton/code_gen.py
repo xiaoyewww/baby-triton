@@ -2,7 +2,6 @@ import ast
 import astunparse
 from typing import Dict, Any
 import tvm
-from typing import Dict, Any
 from tvm import relax as rx
 from tvm import dlight as dl
 from tvm.script import relax
@@ -57,18 +56,26 @@ class CodeGenerator(ast.NodeVisitor):
 
         # auto schedule the kernel with blocks and threads
         if "cuda" in target.keys:
+            # TODO: how to use meta schedule to replace dllight?
+            #       https://github.com/apache/tvm-rfcs/blob/main/rfcs/0005-meta-schedule-autotensorir.md
             with target:
                 module = dl.ApplyDefaultSchedule(dl.gpu.Fallback(),)(module)
+
+            print("\n")
+            print("==="*30)
             print("After applied dlight...")
             print(f"module:\n{module}")
+            print("==="*30)
 
         with tvm.transform.PassContext(opt_level=3):
             ex = rx.build(module, target)
 
         if "cuda" in target.keys:
-            print("cuda kenrel code: ")
-            print(ex.mod.imported_modules[0].imported_modules[0].get_source())
             print("\n")
+            print("==="*30)
+            print("\ncuda kenrel code: ")
+            print(ex.mod.imported_modules[0].imported_modules[0].get_source())
+            print("==="*30)
         device = tvm.cuda() if "cuda" in target.keys else tvm.cpu()
         vm = rx.VirtualMachine(ex, device)
         return vm[self.entry]
